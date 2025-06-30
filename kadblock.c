@@ -48,7 +48,7 @@ static int extract_tcp_data(struct sk_buff *skb, char **data)
     if (skb_linearize(skb))
         return -1;
 
-    *data = skb->data + data_off;
+    *data = skb->data + data_off;  // this is tcp payload
 
     return data_len;
 }
@@ -97,6 +97,15 @@ static unsigned int blocker_hook(void *priv,
     */
     int len = extract_tcp_data(skb, &data);
     if (len > 0) {
+        struct iphdr *ip = ip_hdr(skb);
+        struct tcphdr *tcp = tcp_hdr(skb);
+        pr_info("[adblock] Intercepted TCP data, %pI4:%u -> %pI4:%u, length=%d, content=%.50s\n", 
+        &ip->saddr, ntohs(tcp->source),
+        &ip->daddr, ntohs(tcp->dest),
+        len, data);
+
+        print_hex_dump(KERN_INFO, "payload: ", DUMP_PREFIX_OFFSET, 16, 1, data, len > 128 ? 128 : len, true);
+
         /*  We use user space program to handle TLS.
             If the program isn't opening the device,
             then we just let the packet go through.
@@ -120,6 +129,7 @@ static unsigned int blocker_hook(void *priv,
             result = glob_match("*ad[bcfgklnpqstwxyz_.=?-]*", data + 4);
         }
         if (result > 0) {
+            pr_info("[adblock] Dropping TCP packet matched by ad pattern.\n");
             send_server_reset(skb, state);
             return NF_DROP;
         }
@@ -193,7 +203,7 @@ static int mod_init(void)
         pr_alert("Registering char device failed with %d\n", major);
         return major;
     }
-    cls = class_create(THIS_MODULE, DEV_NAME);
+    cls = class_create(DEV_NAME);
     device_create(cls, NULL, MKDEV(major, 0), NULL, DEV_NAME);
 
     init_verdict();
