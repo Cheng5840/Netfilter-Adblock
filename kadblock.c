@@ -196,29 +196,60 @@ static struct file_operations fops = {.owner = THIS_MODULE,
 static struct class *cls;
 static int major;
 
-static int mod_init(void)
+static int __init mod_init(void)
 {
+    int ret;
+
     major = register_chrdev(0, DEV_NAME, &fops);
     if (major < 0) {
-        pr_alert("Registering char device failed with %d\n", major);
+        pr_alert("Registering char device failed: %d\n", major);
         return major;
     }
-    cls = class_create(DEV_NAME);
-    device_create(cls, NULL, MKDEV(major, 0), NULL, DEV_NAME);
+
+    cls = class_create(THIS_MODULE, DEV_NAME);
+    if (IS_ERR(cls)) {
+        ret = PTR_ERR(cls);
+        unregister_chrdev(major, DEV_NAME);
+        pr_alert("class_create failed: %d\n", ret);
+        return ret;
+    }
+
+    dev = device_create(cls, NULL, MKDEV(major, 0), NULL, DEV_NAME);
+    if (IS_ERR(dev)) {
+        ret = PTR_ERR(dev);
+        class_destroy(cls);
+        unregister_chrdev(major, DEV_NAME);
+        pr_alert("device_create failed: %d\n", ret);
+        return ret;
+    }
 
     init_verdict();
-    return nf_register_net_hook(&init_net, &blocker_ops);
+
+    ret = nf_register_net_hook(&init_net, &blocker_ops);
+    if (ret) {
+        pr_alert("nf_register_net_hook failed: %d\n", ret);
+        device_destroy(cls, MKDEV(major, 0));
+        class_destroy(cls);
+        unregister_chrdev(major, DEV_NAME);
+        return ret;
+    }
+
+    pr_info("adblock module loaded, major=%d\n", major);
+    return 0;
 }
 
-static void mod_exit(void)
+static void __exit mod_exit(void)
 {
+    nf_unregister_net_hook(&init_net, &blocker_ops);
     device_destroy(cls, MKDEV(major, 0));
     class_destroy(cls);
     unregister_chrdev(major, DEV_NAME);
-    nf_unregister_net_hook(&init_net, &blocker_ops);
+    pr_info("adblock module unloaded\n");
 }
 
 module_init(mod_init);
 module_exit(mod_exit);
+
+
 
 MODULE_LICENSE("GPL");
