@@ -194,6 +194,7 @@ static struct file_operations fops = {.owner = THIS_MODULE,
 #define DEV_NAME "adbdev"
 
 static struct class *cls;
+static struct device *dev;
 static int major;
 
 static int __init mod_init(void)
@@ -206,7 +207,7 @@ static int __init mod_init(void)
         return major;
     }
 
-    cls = class_create(THIS_MODULE, DEV_NAME);
+    cls = class_create(DEV_NAME);
     if (IS_ERR(cls)) {
         ret = PTR_ERR(cls);
         unregister_chrdev(major, DEV_NAME);
