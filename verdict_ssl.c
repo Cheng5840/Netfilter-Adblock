@@ -14,22 +14,23 @@ void init_verdict(void)
 
 struct queue_st *insert_order(ktime_t timestamp)
 {
-    int ret = mutex_trylock(&insert_mutex);
-    if (ret != 0) {
-        struct list_head *cur;
-        struct queue_st *order;
-        list_for_each (cur, &order_head) {
-            order = list_entry(cur, struct queue_st, head);
-            if (order->timestamp < timestamp)
-                break;
-        }
-        order = kmalloc(sizeof(struct queue_st), GFP_KERNEL);
-        order->timestamp = timestamp;
-        list_add(&order->head, cur);
-        mutex_unlock(&insert_mutex);
-        return order;
+    struct list_head *pos;
+    struct queue_st *entry;
+    struct queue_st *new = kmalloc(sizeof(*new), GFP_KERNEL);
+    if (!new) return NULL;
+    new->timestamp = timestamp;
+
+    mutex_lock(&insert_mutex);
+    /* 找到第一個 timestamp > new 的節點 */
+    list_for_each(pos, &order_head) {
+        entry = list_entry(pos, struct queue_st, head);
+        if (entry->timestamp > timestamp)
+            break;
     }
-    return NULL;
+
+    list_add_tail(&new->head, pos);
+    mutex_unlock(&insert_mutex);
+    return new;
 }
 
 
