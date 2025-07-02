@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <limits.h> 
 
 #include "ssl_sniff.skel.h"
 
@@ -53,16 +54,43 @@ int main(int argc, char *argv[])
 
     for (int i = 1; i < argc; i += 2) {
         printf("Attaching %s in %s\n", argv[i + 1], argv[i]);
-        struct bpf_uprobe_opts *ops = malloc(sizeof(struct bpf_uprobe_opts));
-        ops->sz = sizeof(*ops);
-        ops->ref_ctr_offset = 0x6;
-        ops->retprobe = false;
-        ops->func_name = argv[i + 1];
-        struct bpf_link *link = bpf_program__attach_uprobe_opts(skel->progs.probe_SSL_write, -1,
-                                        argv[i], 0, ops);
-        if(!link)
-            printf("Error attaching %s in %s\n", argv[i + 1], argv[i]);
+        const char *rawpath = argv[i];         // 參數帶進來的 so
+        const char *func    = argv[i + 1];     // 對應函式名
+        char so[PATH_MAX];
+
+        /* 1 路徑統一成 loader 用的 inode */
+        if (!realpath(rawpath, so)) {
+            perror(rawpath);
+            continue;
+        }
+
+        /* 2 如果想用 offset（可避免符號解析問題） */
+        size_t offset = 0;
+        if (!strcmp(func, "SSL_write"))
+            offset = 0x36b20;                  // readelf 算出
+        /* PR_Write 也可以事先用 readelf 算 offset 放這裡 */
+
+        /* 3 清乾淨 opts，只留必要欄位 */
+        struct bpf_uprobe_opts opts = {
+            .sz       = sizeof(opts),
+            .retprobe = false,
+        };
+
+        if (offset)
+            ;                                  // 用 offset attach
+        else
+            opts.func_name = func;             // 用符號名 attach
+
+        /* ref_ctr_offset 留 0 就對了（沒有 USDT semaphore 就別設） */
+
+        struct bpf_link *link =
+            bpf_program__attach_uprobe_opts(skel->progs.probe_SSL_write,
+                                            -1, so, offset, &opts);
+        if (!link)
+            fprintf(stderr, "Error attaching %s in %s: %s (errno=%d)\n",
+                    func, so, strerror(errno), errno);
     }
+
 
     pb = perf_buffer__new(bpf_map__fd(skel->maps.tls_event), 8, &handle_sniff,
                           NULL, NULL, NULL);
